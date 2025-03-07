@@ -62,7 +62,7 @@
 
     <footer id="player-container" class="hidden">
       <div id="audio-player">
-        <audio id="meditation-audio" preload="auto"></audio>
+        <audio id="meditation-audio" preload="auto" playsinline></audio>
         <div id="player-controls">
           <button id="play-pause" aria-label="Play">▶</button>
           <div id="playback-info">
@@ -121,6 +121,53 @@
             });
         });
       }
+
+      // Add wake lock support to prevent device from sleeping during meditation
+      let wakeLock = null;
+
+      async function requestWakeLock() {
+        if ("wakeLock" in navigator) {
+          try {
+            wakeLock = await navigator.wakeLock.request("screen");
+            wakeLock.addEventListener("release", () => {
+              console.log("Wake Lock was released");
+            });
+            console.log("Wake Lock is active");
+          } catch (err) {
+            console.error(
+              `Failed to get Wake Lock: ${err.name}, ${err.message}`
+            );
+          }
+        }
+      }
+
+      // Request wake lock when audio starts playing
+      document
+        .getElementById("meditation-audio")
+        .addEventListener("play", requestWakeLock);
+
+      // Release wake lock when audio stops
+      document
+        .getElementById("meditation-audio")
+        .addEventListener("pause", () => {
+          if (wakeLock !== null) {
+            wakeLock.release().then(() => {
+              wakeLock = null;
+            });
+          }
+        });
+
+      // Handle visibility change to re-request wake lock when returning to the tab
+      document.addEventListener("visibilitychange", async () => {
+        if (
+          wakeLock !== null &&
+          document.visibilityState === "visible" &&
+          document.getElementById("meditation-audio") &&
+          !document.getElementById("meditation-audio").paused
+        ) {
+          wakeLock = await navigator.wakeLock.request("screen");
+        }
+      });
     </script>
   </body>
 </html>
@@ -377,6 +424,59 @@ function setupEventListeners() {
 
   // Handle visibility change (user switching tabs/apps)
   document.addEventListener("visibilitychange", handleVisibilityChange);
+
+  // Listen for audio errors that might affect playback
+  audioEl.addEventListener("error", (e) => {
+    console.error("Audio error:", e);
+    isPlaying = false;
+    updatePlayPauseButton();
+
+    if ("mediaSession" in navigator) {
+      navigator.mediaSession.playbackState = "none";
+    }
+  });
+
+  // Listen for stalled playback
+  audioEl.addEventListener("stalled", () => {
+    console.warn("Audio playback stalled");
+
+    // Update UI but don't change isPlaying state yet
+    if ("mediaSession" in navigator) {
+      navigator.mediaSession.playbackState = "paused";
+    }
+  });
+
+  // Listen for when audio resumes after being stalled
+  audioEl.addEventListener("playing", () => {
+    isPlaying = true;
+    updatePlayPauseButton();
+
+    if ("mediaSession" in navigator) {
+      navigator.mediaSession.playbackState = "playing";
+    }
+  });
+
+  // Handle playback progress more actively for media session
+  audioEl.addEventListener("timeupdate", () => {
+    // Update progress as usual
+    updateProgress();
+
+    // Keep media session in sync with current playback
+    if (isPlaying && "mediaSession" in navigator && audioEl.currentTime > 0) {
+      navigator.mediaSession.playbackState = "playing";
+
+      // Update less frequently to avoid performance issues
+      if (Math.floor(audioEl.currentTime) % 5 === 0) {
+        if ("setPositionState" in navigator.mediaSession) {
+          navigator.mediaSession.setPositionState({
+            duration: audioEl.duration || 0,
+            position: audioEl.currentTime || 0,
+            playbackRate: audioEl.playbackRate || 1,
+          });
+        }
+      }
+    }
+  });
 }
 
 function playMeditation(meditation) {
@@ -387,19 +487,40 @@ function playMeditation(meditation) {
   audioEl.src = meditation.assetName;
   audioEl.load();
 
+  // Show player if it was hidden
+  playerContainerEl.classList.remove("hidden");
+
+  // Set up media session before playing
+  setupMediaSession();
+
   // Play after a short delay to ensure audio is loaded
   setTimeout(() => {
-    audioEl
-      .play()
-      .then(() => {
-        isPlaying = true;
-        updatePlayPauseButton();
-        setupMediaSession();
-      })
-      .catch((error) => {
-        console.error("Failed to play meditation:", error);
-      });
-  }, 100);
+    const playPromise = audioEl.play();
+
+    if (playPromise !== undefined) {
+      playPromise
+        .then(() => {
+          isPlaying = true;
+          updatePlayPauseButton();
+
+          // Ensure media session is updated
+          if ("mediaSession" in navigator) {
+            navigator.mediaSession.playbackState = "playing";
+          }
+        })
+        .catch((error) => {
+          console.error("Failed to play meditation:", error);
+          isPlaying = false;
+          updatePlayPauseButton();
+
+          // Try again with user interaction if it's an autoplay policy error
+          if (error.name === "NotAllowedError") {
+            console.log("Autoplay prevented - waiting for user interaction");
+            // Don't change UI - user will need to press play manually
+          }
+        });
+    }
+  }, 200); // Slightly longer delay for better reliability
 
   // Save to local storage
   localStorage.setItem(
@@ -494,6 +615,20 @@ function handleMeditationEnd() {
   // Reset UI
   isPlaying = false;
   updatePlayPauseButton();
+
+  // Update Media Session state
+  if ("mediaSession" in navigator) {
+    navigator.mediaSession.playbackState = "none";
+
+    // Reset position state if supported
+    if ("setPositionState" in navigator.mediaSession) {
+      navigator.mediaSession.setPositionState({
+        duration: 0,
+        position: 0,
+        playbackRate: 1,
+      });
+    }
+  }
 }
 
 function updateStreak(change) {
@@ -579,6 +714,7 @@ function updateStatsDisplay() {
 function setupMediaSession() {
   if (!("mediaSession" in navigator) || !currentMeditation) return;
 
+  // Set metadata for media session
   navigator.mediaSession.metadata = new MediaMetadata({
     title: currentMeditation.title,
     artist: "The Cutting Machinery",
@@ -598,22 +734,59 @@ function setupMediaSession() {
     ],
   });
 
+  // Ensure playback state is always correctly set
+  navigator.mediaSession.playbackState = isPlaying ? "playing" : "paused";
+
+  // Set position state for accurate progress tracking on lock screen
+  function updatePositionState() {
+    if ("setPositionState" in navigator.mediaSession) {
+      navigator.mediaSession.setPositionState({
+        duration: audioEl.duration || 0,
+        position: audioEl.currentTime || 0,
+        playbackRate: audioEl.playbackRate || 1,
+      });
+    }
+  }
+
+  // Update position state regularly to keep lock screen in sync
+  const positionUpdateInterval = setInterval(() => {
+    if (isPlaying) {
+      updatePositionState();
+    }
+  }, 1000); // Update every second
+
+  // Clear interval when meditation ends
+  audioEl.addEventListener("ended", () => {
+    clearInterval(positionUpdateInterval);
+  });
+
   // Set action handlers
   navigator.mediaSession.setActionHandler("play", () => {
-    audioEl.play();
-    isPlaying = true;
-    updatePlayPauseButton();
+    audioEl
+      .play()
+      .then(() => {
+        isPlaying = true;
+        updatePlayPauseButton();
+        navigator.mediaSession.playbackState = "playing";
+        updatePositionState();
+      })
+      .catch((error) => {
+        console.error("Media Session play error:", error);
+      });
   });
 
   navigator.mediaSession.setActionHandler("pause", () => {
     audioEl.pause();
     isPlaying = false;
     updatePlayPauseButton();
+    navigator.mediaSession.playbackState = "paused";
+    updatePositionState();
   });
 
   navigator.mediaSession.setActionHandler("seekbackward", (details) => {
     const skipTime = details.seekOffset || 10;
     audioEl.currentTime = Math.max(audioEl.currentTime - skipTime, 0);
+    updatePositionState();
   });
 
   navigator.mediaSession.setActionHandler("seekforward", (details) => {
@@ -622,23 +795,45 @@ function setupMediaSession() {
       audioEl.currentTime + skipTime,
       audioEl.duration
     );
+    updatePositionState();
   });
 
   navigator.mediaSession.setActionHandler("seekto", (details) => {
     if (details.fastSeek && "fastSeek" in audioEl) {
       audioEl.fastSeek(details.seekTime);
-      return;
+    } else {
+      audioEl.currentTime = details.seekTime;
     }
-    audioEl.currentTime = details.seekTime;
+    updatePositionState();
   });
 
   // Previous track handler (restart current track)
   navigator.mediaSession.setActionHandler("previoustrack", () => {
     audioEl.currentTime = 0;
+    updatePositionState();
   });
 
   // Next track handler (we don't have playlists yet, so do nothing)
   navigator.mediaSession.setActionHandler("nexttrack", null);
+
+  // Also update these event listeners to keep media session in sync
+  audioEl.addEventListener("play", () => {
+    navigator.mediaSession.playbackState = "playing";
+    updatePositionState();
+  });
+
+  audioEl.addEventListener("pause", () => {
+    navigator.mediaSession.playbackState = "paused";
+    updatePositionState();
+  });
+
+  audioEl.addEventListener("timeupdate", () => {
+    // Only update occasionally to avoid performance issues
+    if (audioEl.currentTime % 5 < 0.1) {
+      // Update roughly every 5 seconds
+      updatePositionState();
+    }
+  });
 }
 
 function handleVisibilityChange() {
@@ -797,7 +992,7 @@ function hideOfflineNotification() {
 
 ```js
 // Service worker for The Cutting Machinery PWA
-const STATIC_CACHE = "static-assets-v1";
+const STATIC_CACHE = "static-assets-v2"; // Version bump to force cache refresh
 const AUDIO_CACHE = "audio-assets-v1"; // Separate cache for audio files that never change
 
 // Regular assets to cache (non-audio)
@@ -847,6 +1042,9 @@ const AUDIO_ASSETS = [
 self.addEventListener("install", (event) => {
   console.log("[Service Worker] Installing...");
 
+  // Skip waiting to ensure the new service worker takes over immediately
+  self.skipWaiting();
+
   event.waitUntil(
     Promise.all([
       // Cache static assets
@@ -861,7 +1059,7 @@ self.addEventListener("install", (event) => {
         console.log("[Service Worker] Caching audio assets");
         return cache.addAll(AUDIO_ASSETS);
       }),
-    ]).then(() => self.skipWaiting())
+    ])
   );
 });
 
@@ -869,24 +1067,22 @@ self.addEventListener("install", (event) => {
 self.addEventListener("activate", (event) => {
   console.log("[Service Worker] Activating...");
 
-  event.waitUntil(
-    caches
-      .keys()
-      .then((keyList) => {
-        return Promise.all(
-          keyList.map((key) => {
-            // Never delete the audio cache, only update the static cache
-            if (key !== STATIC_CACHE && key !== AUDIO_CACHE) {
-              console.log("[Service Worker] Removing old cache", key);
-              return caches.delete(key);
-            }
-          })
-        );
-      })
-      .then(() => self.clients.claim())
-  );
+  // Take control immediately
+  self.clients.claim();
 
-  return self.clients.claim();
+  event.waitUntil(
+    caches.keys().then((keyList) => {
+      return Promise.all(
+        keyList.map((key) => {
+          // Never delete the audio cache, only update the static cache
+          if (key !== STATIC_CACHE && key !== AUDIO_CACHE) {
+            console.log("[Service Worker] Removing old cache", key);
+            return caches.delete(key);
+          }
+        })
+      );
+    })
+  );
 });
 
 // Fetch event with optimized strategy for audio files
@@ -906,6 +1102,10 @@ self.addEventListener("fetch", (event) => {
         .then((response) => {
           if (response) {
             // If audio is in cache, return it immediately
+            // Add range request support for better streaming
+            if (event.request.headers.has("range")) {
+              return handleRangeRequest(response, event.request);
+            }
             return response;
           }
 
@@ -1027,5 +1227,33 @@ self.addEventListener("notificationclick", (event) => {
 
   event.waitUntil(clients.openWindow("/"));
 });
+
+// Helper function to handle range requests for better audio streaming
+async function handleRangeRequest(response, request) {
+  const rangeHeader = request.headers.get("range");
+  if (!rangeHeader) return response;
+
+  const arrayBuffer = await response.arrayBuffer();
+  const bytes = /^bytes=(\d+)-(\d+)?$/g.exec(rangeHeader);
+
+  if (!bytes) return response;
+
+  const start = parseInt(bytes[1], 10);
+  const end = bytes[2] ? parseInt(bytes[2], 10) : arrayBuffer.byteLength - 1;
+  const contentLength = end - start + 1;
+
+  const headers = new Headers({
+    "Content-Type": response.headers.get("Content-Type"),
+    "Content-Length": contentLength,
+    "Content-Range": `bytes ${start}-${end}/${arrayBuffer.byteLength}`,
+    "Accept-Ranges": "bytes",
+  });
+
+  return new Response(arrayBuffer.slice(start, end + 1), {
+    status: 206,
+    statusText: "Partial Content",
+    headers,
+  });
+}
 
 ```
