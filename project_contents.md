@@ -1006,7 +1006,6 @@ const STATIC_ASSETS = [
   "/index.html",
   "/css/main.css",
   "/js/main.js",
-  "/offline.html",
   "/manifest.json",
   "/assets/logo.png",
   // Add favicon files if you have them
@@ -1059,7 +1058,6 @@ self.addEventListener("install", (event) => {
       }),
 
       // Cache audio assets with a more aggressive strategy
-      // since they will never change
       caches.open(AUDIO_CACHE).then((cache) => {
         console.log("[Service Worker] Caching audio assets");
         return cache.addAll(AUDIO_ASSETS);
@@ -1180,9 +1178,9 @@ self.addEventListener("fetch", (event) => {
         .catch((error) => {
           console.log("[Service Worker] Fetch failed:", error);
 
-          // Return offline page for document requests
+          // For document requests, return the cached index.html as fallback
           if (event.request.destination === "document") {
-            return caches.match("/offline.html");
+            return caches.match("/index.html");
           }
         });
     })
