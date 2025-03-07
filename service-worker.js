@@ -30,14 +30,6 @@ const MEDIA_ASSETS = [
   "/assets/44-Depression-and-Anger.mp3",
   "/assets/45-Reality-and-Meta.mp3",
   "/assets/46-Fun-Stuff.mp3",
-  "/assets/00-Instruction-1-1.mp3",
-  "/assets/00-Instruction-1-2.mp3",
-  "/assets/00-Instruction-1-3.mp3",
-  "/assets/00-Instruction-2-1.mp3",
-  "/assets/00-Instruction-2-2.mp3",
-  "/assets/00-Instruction-2-3.mp3",
-  "/assets/00-Cooldown.mp3",
-  "/assets/00-Instruction-Sprite.mp3",
 ];
 
 // Cache meditations with progress tracking

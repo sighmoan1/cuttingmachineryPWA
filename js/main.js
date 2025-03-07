@@ -55,22 +55,6 @@ const sections = [
       { title: "Fun Stuff", assetName: "assets/46-Fun-Stuff.mp3" },
     ],
   },
-  {
-    title: "Individual instructions",
-    meditations: [
-      { title: "Instruction 1-1", assetName: "assets/00-Instruction-1-1.mp3" },
-      { title: "Instruction 1-2", assetName: "assets/00-Instruction-1-2.mp3" },
-      { title: "Instruction 1-3", assetName: "assets/00-Instruction-1-3.mp3" },
-      { title: "Instruction 2-1", assetName: "assets/00-Instruction-2-1.mp3" },
-      { title: "Instruction 2-2", assetName: "assets/00-Instruction-2-2.mp3" },
-      { title: "Instruction 2-3", assetName: "assets/00-Instruction-2-3.mp3" },
-      { title: "Cooldown", assetName: "assets/00-Cooldown.mp3" },
-      {
-        title: "Instruction Sprite",
-        assetName: "assets/00-Instruction-Sprite.mp3",
-      },
-    ],
-  },
 ];
 
 // DOM Elements
