@@ -38,8 +38,10 @@
     <header>
       <h1>The Cutting Machinery</h1>
     </header>
-
     <main>
+      <a href="https://thecuttingmachinery.netlify.app/" style="color: white"
+        >Documentation</a
+      >
       <div id="stats-container">
         <div id="streak-counter">
           Streak Days: <span id="streak-days">0</span>
@@ -700,6 +702,9 @@ function updateStatsDisplay() {
 
   if (lastUpdated) {
     const formattedTime = new Intl.DateTimeFormat("default", {
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
       hour: "2-digit",
       minute: "2-digit",
       second: "2-digit",
