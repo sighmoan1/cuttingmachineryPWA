@@ -1,3 +1,21 @@
+// Request persistent storage to minimize eviction
+async function requestPersistentStorage() {
+  if (navigator.storage && navigator.storage.persist) {
+    const isPersisted = await navigator.storage.persisted();
+    if (!isPersisted) {
+      const persisted = await navigator.storage.persist();
+      console.log(
+        persisted
+          ? "Persistent storage granted."
+          : "Persistent storage NOT granted."
+      );
+    } else {
+      console.log("Already using persistent storage.");
+    }
+  }
+}
+requestPersistentStorage();
+
 // Data structure for meditations
 const sections = [
   {
@@ -92,30 +110,48 @@ document.addEventListener("DOMContentLoaded", () => {
   loadStatistics();
   setupMediaSession();
   setupOfflineDetection();
+
+  // Register the service worker
+  if ("serviceWorker" in navigator) {
+    navigator.serviceWorker
+      .register("/service-worker.js")
+      .then((registration) => {
+        console.log("Service Worker registered:", registration);
+
+        // When the service worker is active, trigger caching of meditation files.
+        if (navigator.serviceWorker.controller) {
+          navigator.serviceWorker.controller.postMessage({
+            type: "CACHE_ALL_MEDITATIONS",
+          });
+        } else {
+          navigator.serviceWorker.addEventListener("controllerchange", () => {
+            navigator.serviceWorker.controller.postMessage({
+              type: "CACHE_ALL_MEDITATIONS",
+            });
+          });
+        }
+      })
+      .catch((error) => console.error("SW registration failed:", error));
+  }
 });
 
-// Functions
+// Render the meditation list from sections
 function renderMeditationList() {
-  // Clear the container
   meditationSectionsEl.innerHTML = "";
-
-  // For each section
   sections.forEach((section) => {
     const sectionEl = document.createElement("div");
     sectionEl.className = "section";
 
-    // Create section title
     const titleEl = document.createElement("h2");
     titleEl.className = "section-title";
     titleEl.textContent = section.title;
     sectionEl.appendChild(titleEl);
 
-    // Create meditation items
     section.meditations.forEach((meditation) => {
       const meditationEl = document.createElement("div");
       meditationEl.className = "meditation-item";
 
-      // Special case for Cutting Machinery Hour (with logo)
+      // Special case for Cutting Machinery Hour with logo
       if (
         section.title === "Cutting Machinery Hour" &&
         meditation.title === "Cutting Machinery Hour"
@@ -131,7 +167,6 @@ function renderMeditationList() {
       titleTextEl.textContent = meditation.title;
       meditationEl.appendChild(titleTextEl);
 
-      // Add click event to play meditation
       meditationEl.addEventListener("click", () => {
         playMeditation(meditation);
       });
@@ -143,19 +178,16 @@ function renderMeditationList() {
   });
 }
 
+// Set up various event listeners
 function setupEventListeners() {
-  // Player controls
   playPauseBtn.addEventListener("click", togglePlayPause);
-
   audioEl.addEventListener("timeupdate", updateProgress);
   audioEl.addEventListener("loadedmetadata", () => {
     setDuration();
-    // Show player if it was hidden
     playerContainerEl.classList.remove("hidden");
   });
   audioEl.addEventListener("ended", handleMeditationEnd);
 
-  // Progress slider
   progressSliderEl.addEventListener("input", () => {
     isUserSeeking = true;
     const seekTime = (progressSliderEl.value / 100) * audioEl.duration;
@@ -168,7 +200,6 @@ function setupEventListeners() {
     isUserSeeking = false;
   });
 
-  // Speed buttons
   speedButtons.forEach((button) => {
     button.addEventListener("click", () => {
       const speed = parseFloat(button.dataset.speed);
@@ -176,7 +207,6 @@ function setupEventListeners() {
     });
   });
 
-  // Streak counter buttons
   decreaseStreakBtn.addEventListener("mousedown", () => {
     updateStreak(-1);
     incrementTimer = setInterval(() => updateStreak(-1), 200);
@@ -187,7 +217,6 @@ function setupEventListeners() {
     incrementTimer = setInterval(() => updateStreak(1), 200);
   });
 
-  // Clear interval on mouse up/leave
   [decreaseStreakBtn, increaseStreakBtn].forEach((btn) => {
     btn.addEventListener("mouseup", clearIncrementTimer);
     btn.addEventListener("mouseleave", clearIncrementTimer);
@@ -195,7 +224,6 @@ function setupEventListeners() {
     btn.addEventListener("touchcancel", clearIncrementTimer);
   });
 
-  // Mobile touch support
   decreaseStreakBtn.addEventListener("touchstart", (e) => {
     e.preventDefault();
     updateStreak(-1);
@@ -208,7 +236,6 @@ function setupEventListeners() {
     incrementTimer = setInterval(() => updateStreak(1), 200);
   });
 
-  // PWA installation
   if (installButtonEl) {
     installButtonEl.addEventListener("click", installPWA);
   }
@@ -217,60 +244,42 @@ function setupEventListeners() {
     closePromptButtonEl.addEventListener("click", hideInstallPrompt);
   }
 
-  // Listen for beforeinstallprompt event
   window.addEventListener("beforeinstallprompt", (e) => {
-    // Prevent Chrome 67 and earlier from automatically showing the prompt
     e.preventDefault();
-    // Stash the event so it can be triggered later
     deferredPrompt = e;
-    // Show the install prompt
     showInstallPrompt();
   });
 
-  // Handle visibility change (user switching tabs/apps)
   document.addEventListener("visibilitychange", handleVisibilityChange);
 
-  // Listen for audio errors that might affect playback
   audioEl.addEventListener("error", (e) => {
     console.error("Audio error:", e);
     isPlaying = false;
     updatePlayPauseButton();
-
     if ("mediaSession" in navigator) {
       navigator.mediaSession.playbackState = "none";
     }
   });
 
-  // Listen for stalled playback
   audioEl.addEventListener("stalled", () => {
     console.warn("Audio playback stalled");
-
-    // Update UI but don't change isPlaying state yet
     if ("mediaSession" in navigator) {
       navigator.mediaSession.playbackState = "paused";
     }
   });
 
-  // Listen for when audio resumes after being stalled
   audioEl.addEventListener("playing", () => {
     isPlaying = true;
     updatePlayPauseButton();
-
     if ("mediaSession" in navigator) {
       navigator.mediaSession.playbackState = "playing";
     }
   });
 
-  // Handle playback progress more actively for media session
   audioEl.addEventListener("timeupdate", () => {
-    // Update progress as usual
     updateProgress();
-
-    // Keep media session in sync with current playback
     if (isPlaying && "mediaSession" in navigator && audioEl.currentTime > 0) {
       navigator.mediaSession.playbackState = "playing";
-
-      // Update less frequently to avoid performance issues
       if (Math.floor(audioEl.currentTime) % 5 === 0) {
         if ("setPositionState" in navigator.mediaSession) {
           navigator.mediaSession.setPositionState({
@@ -284,31 +293,22 @@ function setupEventListeners() {
   });
 }
 
+// Play a selected meditation
 function playMeditation(meditation) {
   currentMeditation = meditation;
   document.title = `${meditation.title} - The Cutting Machinery`;
-
-  // Set audio source
   audioEl.src = meditation.assetName;
   audioEl.load();
-
-  // Show player if it was hidden
   playerContainerEl.classList.remove("hidden");
-
-  // Set up media session before playing
   setupMediaSession();
 
-  // Play after a short delay to ensure audio is loaded
   setTimeout(() => {
     const playPromise = audioEl.play();
-
     if (playPromise !== undefined) {
       playPromise
         .then(() => {
           isPlaying = true;
           updatePlayPauseButton();
-
-          // Ensure media session is updated
           if ("mediaSession" in navigator) {
             navigator.mediaSession.playbackState = "playing";
           }
@@ -317,17 +317,13 @@ function playMeditation(meditation) {
           console.error("Failed to play meditation:", error);
           isPlaying = false;
           updatePlayPauseButton();
-
-          // Try again with user interaction if it's an autoplay policy error
           if (error.name === "NotAllowedError") {
             console.log("Autoplay prevented - waiting for user interaction");
-            // Don't change UI - user will need to press play manually
           }
         });
     }
-  }, 200); // Slightly longer delay for better reliability
+  }, 200);
 
-  // Save to local storage
   localStorage.setItem(
     "lastPlayedMeditation",
     JSON.stringify({
@@ -339,7 +335,6 @@ function playMeditation(meditation) {
 
 function togglePlayPause() {
   if (!currentMeditation) return;
-
   if (isPlaying) {
     audioEl.pause();
     isPlaying = false;
@@ -353,15 +348,12 @@ function togglePlayPause() {
         console.error("Failed to play meditation:", error);
       });
   }
-
   updatePlayPauseButton();
 }
 
 function updatePlayPauseButton() {
   playPauseBtn.innerHTML = isPlaying ? "❚❚" : "▶";
   playPauseBtn.setAttribute("aria-label", isPlaying ? "Pause" : "Play");
-
-  // Update Media Session state
   if ("mediaSession" in navigator) {
     navigator.mediaSession.playbackState = isPlaying ? "playing" : "paused";
   }
@@ -370,25 +362,17 @@ function updatePlayPauseButton() {
 function setDuration() {
   const duration = audioEl.duration;
   if (isNaN(duration)) return;
-
   durationEl.textContent = formatTime(duration);
-  progressSliderEl.max = 100; // Use percentage for better compatibility
+  progressSliderEl.max = 100;
 }
 
 function updateProgress() {
-  if (isUserSeeking) return; // Don't update while user is dragging slider
-
+  if (isUserSeeking) return;
   const currentTime = audioEl.currentTime;
   const duration = audioEl.duration;
-
   if (isNaN(duration)) return;
-
-  // Update time display
   currentTimeEl.textContent = formatTime(currentTime);
-
-  // Update progress slider
-  const progressPercent = (currentTime / duration) * 100;
-  progressSliderEl.value = progressPercent;
+  progressSliderEl.value = (currentTime / duration) * 100;
 }
 
 function formatTime(seconds) {
@@ -404,28 +388,17 @@ function formatTime(seconds) {
 function setPlaybackSpeed(speed) {
   audioEl.playbackRate = speed;
   currentSpeed = speed;
-
-  // Update active button state
   speedButtons.forEach((button) => {
     const buttonSpeed = parseFloat(button.dataset.speed);
-    if (buttonSpeed === speed) {
-      button.classList.add("active");
-    } else {
-      button.classList.remove("active");
-    }
+    button.classList.toggle("active", buttonSpeed === speed);
   });
 }
 
 function handleMeditationEnd() {
-  // Reset UI
   isPlaying = false;
   updatePlayPauseButton();
-
-  // Update Media Session state
   if ("mediaSession" in navigator) {
     navigator.mediaSession.playbackState = "none";
-
-    // Reset position state if supported
     if ("setPositionState" in navigator.mediaSession) {
       navigator.mediaSession.setPositionState({
         duration: 0,
@@ -439,7 +412,6 @@ function handleMeditationEnd() {
 function updateStreak(change) {
   streakDays = Math.max(0, streakDays + change);
   lastUpdated = new Date();
-
   updateStatsDisplay();
   saveStatistics();
 }
@@ -452,9 +424,7 @@ function clearIncrementTimer() {
 }
 
 function loadStatistics() {
-  // Try to load from localStorage
   const storedStats = localStorage.getItem("meditationStats");
-
   if (storedStats) {
     const parsedStats = JSON.parse(storedStats);
     streakDays = parsedStats.streakDays || 0;
@@ -462,19 +432,14 @@ function loadStatistics() {
       ? new Date(parsedStats.lastUpdated)
       : null;
   }
-
   updateStatsDisplay();
-
-  // Try to load last played meditation
   const lastPlayedMeditation = localStorage.getItem("lastPlayedMeditation");
   if (lastPlayedMeditation) {
     try {
       const meditation = JSON.parse(lastPlayedMeditation);
-      // Find the meditation in our sections
       for (const section of sections) {
         for (const med of section.meditations) {
           if (med.assetName === meditation.assetName) {
-            // Don't auto-play, just prepare the player
             currentMeditation = med;
             document.title = `${med.title} - The Cutting Machinery`;
             audioEl.src = med.assetName;
@@ -502,7 +467,6 @@ function saveStatistics() {
 
 function updateStatsDisplay() {
   streakDaysEl.textContent = streakDays;
-
   if (lastUpdated) {
     const formattedTime = new Intl.DateTimeFormat("default", {
       year: "numeric",
@@ -512,7 +476,6 @@ function updateStatsDisplay() {
       minute: "2-digit",
       second: "2-digit",
     }).format(lastUpdated);
-
     lastUpdatedEl.textContent = `Last Updated: ${formattedTime}`;
   } else {
     lastUpdatedEl.textContent = "";
@@ -521,8 +484,6 @@ function updateStatsDisplay() {
 
 function setupMediaSession() {
   if (!("mediaSession" in navigator) || !currentMeditation) return;
-
-  // Set metadata for media session
   navigator.mediaSession.metadata = new MediaMetadata({
     title: currentMeditation.title,
     artist: "The Cutting Machinery",
@@ -541,11 +502,7 @@ function setupMediaSession() {
       },
     ],
   });
-
-  // Ensure playback state is always correctly set
   navigator.mediaSession.playbackState = isPlaying ? "playing" : "paused";
-
-  // Set position state for accurate progress tracking on lock screen
   function updatePositionState() {
     if ("setPositionState" in navigator.mediaSession) {
       navigator.mediaSession.setPositionState({
@@ -555,20 +512,12 @@ function setupMediaSession() {
       });
     }
   }
-
-  // Update position state regularly to keep lock screen in sync
   const positionUpdateInterval = setInterval(() => {
-    if (isPlaying) {
-      updatePositionState();
-    }
-  }, 1000); // Update every second
-
-  // Clear interval when meditation ends
+    if (isPlaying) updatePositionState();
+  }, 1000);
   audioEl.addEventListener("ended", () => {
     clearInterval(positionUpdateInterval);
   });
-
-  // Set action handlers
   navigator.mediaSession.setActionHandler("play", () => {
     audioEl
       .play()
@@ -582,7 +531,6 @@ function setupMediaSession() {
         console.error("Media Session play error:", error);
       });
   });
-
   navigator.mediaSession.setActionHandler("pause", () => {
     audioEl.pause();
     isPlaying = false;
@@ -590,13 +538,11 @@ function setupMediaSession() {
     navigator.mediaSession.playbackState = "paused";
     updatePositionState();
   });
-
   navigator.mediaSession.setActionHandler("seekbackward", (details) => {
     const skipTime = details.seekOffset || 10;
     audioEl.currentTime = Math.max(audioEl.currentTime - skipTime, 0);
     updatePositionState();
   });
-
   navigator.mediaSession.setActionHandler("seekforward", (details) => {
     const skipTime = details.seekOffset || 10;
     audioEl.currentTime = Math.min(
@@ -605,7 +551,6 @@ function setupMediaSession() {
     );
     updatePositionState();
   });
-
   navigator.mediaSession.setActionHandler("seekto", (details) => {
     if (details.fastSeek && "fastSeek" in audioEl) {
       audioEl.fastSeek(details.seekTime);
@@ -614,38 +559,25 @@ function setupMediaSession() {
     }
     updatePositionState();
   });
-
-  // Previous track handler (restart current track)
   navigator.mediaSession.setActionHandler("previoustrack", () => {
     audioEl.currentTime = 0;
     updatePositionState();
   });
-
-  // Next track handler (we don't have playlists yet, so do nothing)
   navigator.mediaSession.setActionHandler("nexttrack", null);
-
-  // Also update these event listeners to keep media session in sync
   audioEl.addEventListener("play", () => {
     navigator.mediaSession.playbackState = "playing";
     updatePositionState();
   });
-
   audioEl.addEventListener("pause", () => {
     navigator.mediaSession.playbackState = "paused";
     updatePositionState();
   });
-
   audioEl.addEventListener("timeupdate", () => {
-    // Only update occasionally to avoid performance issues
-    if (audioEl.currentTime % 5 < 0.1) {
-      // Update roughly every 5 seconds
-      updatePositionState();
-    }
+    if (audioEl.currentTime % 5 < 0.1) updatePositionState();
   });
 }
 
 function handleVisibilityChange() {
-  // If the page becomes visible again, we should update the UI
   if (!document.hidden && currentMeditation) {
     updatePlayPauseButton();
     updateProgress();
@@ -653,7 +585,6 @@ function handleVisibilityChange() {
 }
 
 function showInstallPrompt() {
-  // Only show if we have the deferred prompt and user hasn't dismissed it
   if (deferredPrompt && !localStorage.getItem("installPromptDismissed")) {
     installPromptEl.classList.remove("hidden");
   }
@@ -668,35 +599,20 @@ function hideInstallPrompt() {
 
 async function installPWA() {
   if (!deferredPrompt) return;
-
-  // Show the install prompt
   deferredPrompt.prompt();
-
-  // Wait for the user to respond to the prompt
   const choiceResult = await deferredPrompt.userChoice;
-
-  // Reset the deferred prompt variable
   deferredPrompt = null;
-
-  // Hide our UI
   hideInstallPrompt();
 }
 
 function setupOfflineDetection() {
-  // Check if currently offline
-  if (!navigator.onLine) {
-    showOfflineNotification();
-  }
-
-  // Add event listeners for online/offline events
+  if (!navigator.onLine) showOfflineNotification();
   window.addEventListener("online", hideOfflineNotification);
   window.addEventListener("offline", showOfflineNotification);
 }
 
 function showOfflineNotification() {
   offlineNotificationEl.classList.remove("hidden");
-
-  // Auto-hide after 5 seconds
   setTimeout(() => {
     offlineNotificationEl.classList.add("hidden");
   }, 5000);
