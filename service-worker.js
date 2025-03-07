@@ -1,5 +1,5 @@
 // Service worker for The Cutting Machinery PWA
-const STATIC_CACHE = "static-assets-v1";
+const STATIC_CACHE = "static-assets-v2"; // Version bump to force cache refresh
 const AUDIO_CACHE = "audio-assets-v1"; // Separate cache for audio files that never change
 
 // Regular assets to cache (non-audio)
@@ -49,6 +49,9 @@ const AUDIO_ASSETS = [
 self.addEventListener("install", (event) => {
   console.log("[Service Worker] Installing...");
 
+  // Skip waiting to ensure the new service worker takes over immediately
+  self.skipWaiting();
+
   event.waitUntil(
     Promise.all([
       // Cache static assets
@@ -63,7 +66,7 @@ self.addEventListener("install", (event) => {
         console.log("[Service Worker] Caching audio assets");
         return cache.addAll(AUDIO_ASSETS);
       }),
-    ]).then(() => self.skipWaiting())
+    ])
   );
 });
 
@@ -71,24 +74,22 @@ self.addEventListener("install", (event) => {
 self.addEventListener("activate", (event) => {
   console.log("[Service Worker] Activating...");
 
-  event.waitUntil(
-    caches
-      .keys()
-      .then((keyList) => {
-        return Promise.all(
-          keyList.map((key) => {
-            // Never delete the audio cache, only update the static cache
-            if (key !== STATIC_CACHE && key !== AUDIO_CACHE) {
-              console.log("[Service Worker] Removing old cache", key);
-              return caches.delete(key);
-            }
-          })
-        );
-      })
-      .then(() => self.clients.claim())
-  );
+  // Take control immediately
+  self.clients.claim();
 
-  return self.clients.claim();
+  event.waitUntil(
+    caches.keys().then((keyList) => {
+      return Promise.all(
+        keyList.map((key) => {
+          // Never delete the audio cache, only update the static cache
+          if (key !== STATIC_CACHE && key !== AUDIO_CACHE) {
+            console.log("[Service Worker] Removing old cache", key);
+            return caches.delete(key);
+          }
+        })
+      );
+    })
+  );
 });
 
 // Fetch event with optimized strategy for audio files
@@ -108,6 +109,10 @@ self.addEventListener("fetch", (event) => {
         .then((response) => {
           if (response) {
             // If audio is in cache, return it immediately
+            // Add range request support for better streaming
+            if (event.request.headers.has("range")) {
+              return handleRangeRequest(response, event.request);
+            }
             return response;
           }
 
@@ -229,3 +234,31 @@ self.addEventListener("notificationclick", (event) => {
 
   event.waitUntil(clients.openWindow("/"));
 });
+
+// Helper function to handle range requests for better audio streaming
+async function handleRangeRequest(response, request) {
+  const rangeHeader = request.headers.get("range");
+  if (!rangeHeader) return response;
+
+  const arrayBuffer = await response.arrayBuffer();
+  const bytes = /^bytes=(\d+)-(\d+)?$/g.exec(rangeHeader);
+
+  if (!bytes) return response;
+
+  const start = parseInt(bytes[1], 10);
+  const end = bytes[2] ? parseInt(bytes[2], 10) : arrayBuffer.byteLength - 1;
+  const contentLength = end - start + 1;
+
+  const headers = new Headers({
+    "Content-Type": response.headers.get("Content-Type"),
+    "Content-Length": contentLength,
+    "Content-Range": `bytes ${start}-${end}/${arrayBuffer.byteLength}`,
+    "Accept-Ranges": "bytes",
+  });
+
+  return new Response(arrayBuffer.slice(start, end + 1), {
+    status: 206,
+    statusText: "Partial Content",
+    headers,
+  });
+}

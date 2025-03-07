@@ -245,6 +245,59 @@ function setupEventListeners() {
 
   // Handle visibility change (user switching tabs/apps)
   document.addEventListener("visibilitychange", handleVisibilityChange);
+
+  // Listen for audio errors that might affect playback
+  audioEl.addEventListener("error", (e) => {
+    console.error("Audio error:", e);
+    isPlaying = false;
+    updatePlayPauseButton();
+
+    if ("mediaSession" in navigator) {
+      navigator.mediaSession.playbackState = "none";
+    }
+  });
+
+  // Listen for stalled playback
+  audioEl.addEventListener("stalled", () => {
+    console.warn("Audio playback stalled");
+
+    // Update UI but don't change isPlaying state yet
+    if ("mediaSession" in navigator) {
+      navigator.mediaSession.playbackState = "paused";
+    }
+  });
+
+  // Listen for when audio resumes after being stalled
+  audioEl.addEventListener("playing", () => {
+    isPlaying = true;
+    updatePlayPauseButton();
+
+    if ("mediaSession" in navigator) {
+      navigator.mediaSession.playbackState = "playing";
+    }
+  });
+
+  // Handle playback progress more actively for media session
+  audioEl.addEventListener("timeupdate", () => {
+    // Update progress as usual
+    updateProgress();
+
+    // Keep media session in sync with current playback
+    if (isPlaying && "mediaSession" in navigator && audioEl.currentTime > 0) {
+      navigator.mediaSession.playbackState = "playing";
+
+      // Update less frequently to avoid performance issues
+      if (Math.floor(audioEl.currentTime) % 5 === 0) {
+        if ("setPositionState" in navigator.mediaSession) {
+          navigator.mediaSession.setPositionState({
+            duration: audioEl.duration || 0,
+            position: audioEl.currentTime || 0,
+            playbackRate: audioEl.playbackRate || 1,
+          });
+        }
+      }
+    }
+  });
 }
 
 function playMeditation(meditation) {
@@ -255,19 +308,40 @@ function playMeditation(meditation) {
   audioEl.src = meditation.assetName;
   audioEl.load();
 
+  // Show player if it was hidden
+  playerContainerEl.classList.remove("hidden");
+
+  // Set up media session before playing
+  setupMediaSession();
+
   // Play after a short delay to ensure audio is loaded
   setTimeout(() => {
-    audioEl
-      .play()
-      .then(() => {
-        isPlaying = true;
-        updatePlayPauseButton();
-        setupMediaSession();
-      })
-      .catch((error) => {
-        console.error("Failed to play meditation:", error);
-      });
-  }, 100);
+    const playPromise = audioEl.play();
+
+    if (playPromise !== undefined) {
+      playPromise
+        .then(() => {
+          isPlaying = true;
+          updatePlayPauseButton();
+
+          // Ensure media session is updated
+          if ("mediaSession" in navigator) {
+            navigator.mediaSession.playbackState = "playing";
+          }
+        })
+        .catch((error) => {
+          console.error("Failed to play meditation:", error);
+          isPlaying = false;
+          updatePlayPauseButton();
+
+          // Try again with user interaction if it's an autoplay policy error
+          if (error.name === "NotAllowedError") {
+            console.log("Autoplay prevented - waiting for user interaction");
+            // Don't change UI - user will need to press play manually
+          }
+        });
+    }
+  }, 200); // Slightly longer delay for better reliability
 
   // Save to local storage
   localStorage.setItem(
@@ -362,6 +436,20 @@ function handleMeditationEnd() {
   // Reset UI
   isPlaying = false;
   updatePlayPauseButton();
+
+  // Update Media Session state
+  if ("mediaSession" in navigator) {
+    navigator.mediaSession.playbackState = "none";
+
+    // Reset position state if supported
+    if ("setPositionState" in navigator.mediaSession) {
+      navigator.mediaSession.setPositionState({
+        duration: 0,
+        position: 0,
+        playbackRate: 1,
+      });
+    }
+  }
 }
 
 function updateStreak(change) {
@@ -447,6 +535,7 @@ function updateStatsDisplay() {
 function setupMediaSession() {
   if (!("mediaSession" in navigator) || !currentMeditation) return;
 
+  // Set metadata for media session
   navigator.mediaSession.metadata = new MediaMetadata({
     title: currentMeditation.title,
     artist: "The Cutting Machinery",
@@ -466,22 +555,59 @@ function setupMediaSession() {
     ],
   });
 
+  // Ensure playback state is always correctly set
+  navigator.mediaSession.playbackState = isPlaying ? "playing" : "paused";
+
+  // Set position state for accurate progress tracking on lock screen
+  function updatePositionState() {
+    if ("setPositionState" in navigator.mediaSession) {
+      navigator.mediaSession.setPositionState({
+        duration: audioEl.duration || 0,
+        position: audioEl.currentTime || 0,
+        playbackRate: audioEl.playbackRate || 1,
+      });
+    }
+  }
+
+  // Update position state regularly to keep lock screen in sync
+  const positionUpdateInterval = setInterval(() => {
+    if (isPlaying) {
+      updatePositionState();
+    }
+  }, 1000); // Update every second
+
+  // Clear interval when meditation ends
+  audioEl.addEventListener("ended", () => {
+    clearInterval(positionUpdateInterval);
+  });
+
   // Set action handlers
   navigator.mediaSession.setActionHandler("play", () => {
-    audioEl.play();
-    isPlaying = true;
-    updatePlayPauseButton();
+    audioEl
+      .play()
+      .then(() => {
+        isPlaying = true;
+        updatePlayPauseButton();
+        navigator.mediaSession.playbackState = "playing";
+        updatePositionState();
+      })
+      .catch((error) => {
+        console.error("Media Session play error:", error);
+      });
   });
 
   navigator.mediaSession.setActionHandler("pause", () => {
     audioEl.pause();
     isPlaying = false;
     updatePlayPauseButton();
+    navigator.mediaSession.playbackState = "paused";
+    updatePositionState();
   });
 
   navigator.mediaSession.setActionHandler("seekbackward", (details) => {
     const skipTime = details.seekOffset || 10;
     audioEl.currentTime = Math.max(audioEl.currentTime - skipTime, 0);
+    updatePositionState();
   });
 
   navigator.mediaSession.setActionHandler("seekforward", (details) => {
@@ -490,23 +616,45 @@ function setupMediaSession() {
       audioEl.currentTime + skipTime,
       audioEl.duration
     );
+    updatePositionState();
   });
 
   navigator.mediaSession.setActionHandler("seekto", (details) => {
     if (details.fastSeek && "fastSeek" in audioEl) {
       audioEl.fastSeek(details.seekTime);
-      return;
+    } else {
+      audioEl.currentTime = details.seekTime;
     }
-    audioEl.currentTime = details.seekTime;
+    updatePositionState();
   });
 
   // Previous track handler (restart current track)
   navigator.mediaSession.setActionHandler("previoustrack", () => {
     audioEl.currentTime = 0;
+    updatePositionState();
   });
 
   // Next track handler (we don't have playlists yet, so do nothing)
   navigator.mediaSession.setActionHandler("nexttrack", null);
+
+  // Also update these event listeners to keep media session in sync
+  audioEl.addEventListener("play", () => {
+    navigator.mediaSession.playbackState = "playing";
+    updatePositionState();
+  });
+
+  audioEl.addEventListener("pause", () => {
+    navigator.mediaSession.playbackState = "paused";
+    updatePositionState();
+  });
+
+  audioEl.addEventListener("timeupdate", () => {
+    // Only update occasionally to avoid performance issues
+    if (audioEl.currentTime % 5 < 0.1) {
+      // Update roughly every 5 seconds
+      updatePositionState();
+    }
+  });
 }
 
 function handleVisibilityChange() {

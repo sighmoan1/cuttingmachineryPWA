@@ -58,7 +58,7 @@
 
     <footer id="player-container" class="hidden">
       <div id="audio-player">
-        <audio id="meditation-audio" preload="auto"></audio>
+        <audio id="meditation-audio" preload="auto" playsinline></audio>
         <div id="player-controls">
           <button id="play-pause" aria-label="Play">▶</button>
           <div id="playback-info">
@@ -117,6 +117,53 @@
             });
         });
       }
+
+      // Add wake lock support to prevent device from sleeping during meditation
+      let wakeLock = null;
+
+      async function requestWakeLock() {
+        if ("wakeLock" in navigator) {
+          try {
+            wakeLock = await navigator.wakeLock.request("screen");
+            wakeLock.addEventListener("release", () => {
+              console.log("Wake Lock was released");
+            });
+            console.log("Wake Lock is active");
+          } catch (err) {
+            console.error(
+              `Failed to get Wake Lock: ${err.name}, ${err.message}`
+            );
+          }
+        }
+      }
+
+      // Request wake lock when audio starts playing
+      document
+        .getElementById("meditation-audio")
+        .addEventListener("play", requestWakeLock);
+
+      // Release wake lock when audio stops
+      document
+        .getElementById("meditation-audio")
+        .addEventListener("pause", () => {
+          if (wakeLock !== null) {
+            wakeLock.release().then(() => {
+              wakeLock = null;
+            });
+          }
+        });
+
+      // Handle visibility change to re-request wake lock when returning to the tab
+      document.addEventListener("visibilitychange", async () => {
+        if (
+          wakeLock !== null &&
+          document.visibilityState === "visible" &&
+          document.getElementById("meditation-audio") &&
+          !document.getElementById("meditation-audio").paused
+        ) {
+          wakeLock = await navigator.wakeLock.request("screen");
+        }
+      });
     </script>
   </body>
 </html>
