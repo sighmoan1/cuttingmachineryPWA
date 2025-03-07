@@ -1,0 +1,280 @@
+/* Base styles */
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  font-family: "Roboto", sans-serif;
+  background-color: #9a1c20;
+  color: white;
+  min-height: 100vh;
+}
+
+/* Header */
+header {
+  background-color: #9a1c20;
+  height: 56px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+
+h1 {
+  font-size: 20px;
+  font-weight: 500;
+}
+
+/* Main content */
+main {
+  flex: 1;
+  padding: 16px;
+  overflow-y: auto;
+  padding-bottom: 200px; /* Space for player */
+}
+
+/* Stats section */
+#stats-container {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  margin: 32px 0;
+}
+
+#streak-counter {
+  font-size: 18px;
+  margin-bottom: 8px;
+}
+
+#last-updated {
+  font-size: 18px;
+  margin-bottom: 8px;
+}
+
+#streak-buttons {
+  display: flex;
+  gap: 16px;
+}
+
+#decrease-streak,
+#increase-streak {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background-color: transparent;
+  border: none;
+  color: white;
+  font-size: 24px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+#decrease-streak:before {
+  content: "−";
+}
+
+#increase-streak:before {
+  content: "+";
+}
+
+/* Meditation list */
+.section {
+  margin-bottom: 24px;
+}
+
+.section-title {
+  font-size: 24px;
+  font-weight: bold;
+  padding: 8px 0;
+  color: white;
+}
+
+.meditation-item {
+  padding: 8px 0;
+  cursor: pointer;
+  transition: background-color 0.2s;
+  display: flex;
+  align-items: center;
+}
+
+.meditation-item:hover {
+  background-color: rgba(255, 255, 255, 0.1);
+}
+
+.meditation-item img {
+  width: 50px;
+  height: 50px;
+  margin-right: 8px;
+}
+
+.meditation-item-title {
+  font-size: 18px;
+  color: white;
+}
+
+/* Player */
+#player-container {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  background-color: #9a1c20;
+  box-shadow: 0 -2px 4px rgba(0, 0, 0, 0.1);
+  padding: 16px;
+  z-index: 5;
+}
+
+#player-controls {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  margin-bottom: 16px;
+}
+
+#play-pause {
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  background-color: transparent;
+  border: none;
+  color: white;
+  font-size: 24px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 16px;
+}
+
+#playback-info {
+  width: 100%;
+  text-align: center;
+  margin-bottom: 16px;
+}
+
+#meditation-title {
+  font-weight: normal;
+  font-size: 16px;
+  margin-bottom: 8px;
+}
+
+#time-display {
+  font-size: 14px;
+  color: rgba(255, 255, 255, 0.8);
+}
+
+#speed-controls {
+  display: flex;
+  justify-content: center;
+  gap: 16px;
+  width: 100%;
+}
+
+.speed-button {
+  background: transparent;
+  border: none;
+  color: white;
+  padding: 4px 8px;
+  cursor: pointer;
+}
+
+.speed-button.active {
+  font-weight: bold;
+  text-decoration: underline;
+}
+
+#progress-container {
+  width: 100%;
+  margin-top: 8px;
+}
+
+#progress-slider {
+  width: 100%;
+  -webkit-appearance: none;
+  height: 4px;
+  background: rgba(255, 255, 255, 0.2);
+  outline: none;
+  border-radius: 2px;
+}
+
+#progress-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: white;
+  cursor: pointer;
+}
+
+#progress-slider::-moz-range-thumb {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: white;
+  cursor: pointer;
+  border: none;
+}
+
+/* Utility classes */
+.hidden {
+  display: none;
+}
+
+/* Install prompt */
+#install-prompt {
+  position: fixed;
+  bottom: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  background-color: #333;
+  color: white;
+  padding: 16px;
+  border-radius: 8px;
+  text-align: center;
+  z-index: 20;
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+  max-width: 90%;
+  width: 320px;
+}
+
+#install-prompt button {
+  margin-top: 16px;
+  margin-right: 8px;
+  padding: 8px 16px;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+#install-button {
+  background-color: white;
+  color: #333;
+}
+
+#close-prompt {
+  background-color: transparent;
+  color: white;
+  border: 1px solid white !important;
+}
+
+/* Offline notification */
+#offline-notification {
+  position: fixed;
+  top: 72px;
+  left: 50%;
+  transform: translateX(-50%);
+  background-color: #333;
+  color: white;
+  padding: 8px 16px;
+  border-radius: 4px;
+  z-index: 20;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+}

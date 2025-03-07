@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#9a1c20" />
+    <title>Offline - The Cutting Machinery</title>
+    <style>
+      body {
+        font-family: "Roboto", sans-serif;
+        background-color: #9a1c20;
+        color: white;
+        text-align: center;
+        padding: 2rem;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        min-height: 100vh;
+        margin: 0;
+      }
+
+      .logo {
+        width: 120px;
+        height: 120px;
+        margin-bottom: 2rem;
+      }
+
+      h1 {
+        margin-bottom: 1rem;
+        font-size: 24px;
+        font-weight: 500;
+      }
+
+      p {
+        margin-bottom: 2rem;
+        max-width: 600px;
+        line-height: 1.6;
+        font-size: 18px;
+      }
+
+      button {
+        background-color: transparent;
+        color: white;
+        border: 2px solid white;
+        padding: 10px 20px;
+        font-size: 16px;
+        cursor: pointer;
+        transition: background-color 0.3s;
+      }
+
+      button:hover {
+        background-color: rgba(255, 255, 255, 0.1);
+      }
+    </style>
+    <link
+      href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap"
+      rel="stylesheet"
+    />
+  </head>
+  <body>
+    <img src="/assets/logo.png" alt="The Cutting Machinery Logo" class="logo" />
+    <h1>You're Offline</h1>
+    <p>
+      It looks like you don't have an internet connection right now. The Cutting
+      Machinery app requires a connection to load initially, but your previously
+      cached meditations are still available.
+    </p>
+    <p>
+      If you've installed the app and visited while online, your meditation
+      audio files should be available for offline use.
+    </p>
+    <button onclick="location.reload()">Try Again</button>
+
+    <script>
+      // Check if we're back online
+      window.addEventListener("online", () => {
+        location.reload();
+      });
+    </script>
+  </body>
+</html>
