@@ -1,9 +1,9 @@
 // Service worker for The Cutting Machinery PWA
-const CACHE_NAME = "cutting-machinery-v1";
-const ASSETS_CACHE = "assets-cache";
+const STATIC_CACHE = "static-assets-v1";
+const AUDIO_CACHE = "audio-assets-v1"; // Separate cache for audio files that never change
 
-// Assets to cache during installation
-const PRECACHE_ASSETS = [
+// Regular assets to cache (non-audio)
+const STATIC_ASSETS = [
   "/",
   "/index.html",
   "/css/main.css",
@@ -11,6 +11,14 @@ const PRECACHE_ASSETS = [
   "/offline.html",
   "/manifest.json",
   "/assets/logo.png",
+  // Add favicon files if you have them
+  "/favicon.ico",
+  "/favicon-16x16.png",
+  "/favicon-32x32.png",
+];
+
+// Audio files that never change
+const AUDIO_ASSETS = [
   "/assets/Hour.mp3",
   "/assets/01-App-Intro.mp3",
   "/assets/02-Pre-Flight.mp3",
@@ -37,22 +45,29 @@ const PRECACHE_ASSETS = [
   "/assets/00-Instruction-Sprite.mp3",
 ];
 
-// Install event - cache all static assets
+// Install event - cache all assets
 self.addEventListener("install", (event) => {
   console.log("[Service Worker] Installing...");
 
   event.waitUntil(
-    caches
-      .open(CACHE_NAME)
-      .then((cache) => {
-        console.log("[Service Worker] Caching app assets");
-        return cache.addAll(PRECACHE_ASSETS);
-      })
-      .then(() => self.skipWaiting())
+    Promise.all([
+      // Cache static assets
+      caches.open(STATIC_CACHE).then((cache) => {
+        console.log("[Service Worker] Caching static assets");
+        return cache.addAll(STATIC_ASSETS);
+      }),
+
+      // Cache audio assets with a more aggressive strategy
+      // since they will never change
+      caches.open(AUDIO_CACHE).then((cache) => {
+        console.log("[Service Worker] Caching audio assets");
+        return cache.addAll(AUDIO_ASSETS);
+      }),
+    ]).then(() => self.skipWaiting())
   );
 });
 
-// Activate event - clean up old caches
+// Activate event - clean up old caches but preserve audio cache
 self.addEventListener("activate", (event) => {
   console.log("[Service Worker] Activating...");
 
@@ -62,7 +77,8 @@ self.addEventListener("activate", (event) => {
       .then((keyList) => {
         return Promise.all(
           keyList.map((key) => {
-            if (key !== CACHE_NAME && key !== ASSETS_CACHE) {
+            // Never delete the audio cache, only update the static cache
+            if (key !== STATIC_CACHE && key !== AUDIO_CACHE) {
               console.log("[Service Worker] Removing old cache", key);
               return caches.delete(key);
             }
@@ -75,59 +91,99 @@ self.addEventListener("activate", (event) => {
   return self.clients.claim();
 });
 
-// Fetch event - serve from cache, fallback to network
+// Fetch event with optimized strategy for audio files
 self.addEventListener("fetch", (event) => {
   // Skip cross-origin requests
-  if (event.request.url.startsWith(self.location.origin)) {
+  if (!event.request.url.startsWith(self.location.origin)) {
+    return;
+  }
+
+  // Special handling for audio files
+  if (event.request.url.endsWith(".mp3")) {
     event.respondWith(
-      caches.match(event.request).then((cachedResponse) => {
-        if (cachedResponse) {
-          // Return cached response
-          return cachedResponse;
-        }
-
-        // If not in cache, fetch from network
-        return fetch(event.request)
-          .then((response) => {
-            // Don't cache if response is not valid
-            if (
-              !response ||
-              response.status !== 200 ||
-              response.type !== "basic"
-            ) {
-              return response;
-            }
-
-            // Clone the response
-            const responseToCache = response.clone();
-
-            // Open cache and store response
-            caches.open(ASSETS_CACHE).then((cache) => {
-              cache.put(event.request, responseToCache);
-            });
-
+      // Check the dedicated audio cache first
+      caches
+        .open(AUDIO_CACHE)
+        .then((cache) => cache.match(event.request))
+        .then((response) => {
+          if (response) {
+            // If audio is in cache, return it immediately
             return response;
-          })
-          .catch((error) => {
-            console.log("[Service Worker] Fetch failed:", error);
+          }
 
-            // Return offline page for document requests
-            if (event.request.destination === "document") {
-              return caches.match("/offline.html");
-            }
+          console.log(
+            "[Service Worker] Audio file not in cache, fetching: ",
+            event.request.url
+          );
 
-            // For audio files, provide some fallback or error message
-            if (event.request.url.endsWith(".mp3")) {
-              // Return an appropriate error response
+          // If not in cache (shouldn't happen after install), fetch from network
+          return fetch(event.request)
+            .then((networkResponse) => {
+              // Clone the response
+              const responseToCache = networkResponse.clone();
+
+              // Store in the audio cache
+              caches.open(AUDIO_CACHE).then((cache) => {
+                cache.put(event.request, responseToCache);
+              });
+
+              return networkResponse;
+            })
+            .catch((error) => {
+              console.error(
+                "[Service Worker] Failed to fetch audio file:",
+                error
+              );
               return new Response("Audio file not available offline", {
                 status: 503,
                 headers: { "Content-Type": "text/plain" },
               });
-            }
-          });
-      })
+            });
+        })
     );
+    return; // Exit early after handling audio
   }
+
+  // For non-audio files, use a cache-first strategy
+  event.respondWith(
+    caches.match(event.request).then((cachedResponse) => {
+      if (cachedResponse) {
+        // Return cached response for non-audio files
+        return cachedResponse;
+      }
+
+      // If not in cache, fetch from network
+      return fetch(event.request)
+        .then((response) => {
+          // Don't cache if response is not valid
+          if (
+            !response ||
+            response.status !== 200 ||
+            response.type !== "basic"
+          ) {
+            return response;
+          }
+
+          // Clone the response
+          const responseToCache = response.clone();
+
+          // Store in the static cache
+          caches.open(STATIC_CACHE).then((cache) => {
+            cache.put(event.request, responseToCache);
+          });
+
+          return response;
+        })
+        .catch((error) => {
+          console.log("[Service Worker] Fetch failed:", error);
+
+          // Return offline page for document requests
+          if (event.request.destination === "document") {
+            return caches.match("/offline.html");
+          }
+        });
+    })
+  );
 });
 
 // Handle background sync
