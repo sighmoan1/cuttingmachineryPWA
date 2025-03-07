@@ -1,4 +1,7 @@
 const CACHE_NAME = "cutting-machinery-v1";
+const MEDIA_CACHE_NAME = "cutting-machinery-media-v1";
+
+// Essential app assets (small files)
 const PRECACHE_ASSETS = [
   "/",
   "/index.html",
@@ -7,7 +10,10 @@ const PRECACHE_ASSETS = [
   "/offline.html",
   "/manifest.json",
   "/assets/logo.png",
-  // Include every meditation audio file
+];
+
+// Media assets (larger files)
+const MEDIA_ASSETS = [
   "/assets/Hour.mp3",
   "/assets/01-App-Intro.mp3",
   "/assets/02-Pre-Flight.mp3",
@@ -34,6 +40,44 @@ const PRECACHE_ASSETS = [
   "/assets/00-Instruction-Sprite.mp3",
 ];
 
+// Cache meditations with progress tracking
+function cacheMediaAssets() {
+  return caches.open(MEDIA_CACHE_NAME).then((cache) => {
+    console.log("[Service Worker] Caching meditation files");
+
+    // Create an array of promises for each asset
+    const mediaPromises = MEDIA_ASSETS.map((url) => {
+      return fetch(url)
+        .then((response) => {
+          if (!response || response.status !== 200) {
+            throw new Error(`Failed to fetch: ${url}`);
+          }
+          return cache.put(url, response);
+        })
+        .then(() => {
+          // Update progress in IndexedDB or postMessage to client
+          return self.clients.matchAll().then((clients) => {
+            clients.forEach((client) => {
+              client.postMessage({
+                type: "CACHE_PROGRESS",
+                url: url,
+                total: MEDIA_ASSETS.length,
+              });
+            });
+          });
+        })
+        .catch((error) => {
+          console.error(`[Service Worker] Failed to cache: ${url}`, error);
+          // Continue with other files even if one fails
+          return Promise.resolve();
+        });
+    });
+
+    return Promise.all(mediaPromises);
+  });
+}
+
+// Install event - cache core app files
 self.addEventListener("install", (event) => {
   console.log("[Service Worker] Installing...");
   event.waitUntil(
@@ -43,10 +87,18 @@ self.addEventListener("install", (event) => {
         console.log("[Service Worker] Caching app assets");
         return cache.addAll(PRECACHE_ASSETS);
       })
-      .then(() => self.skipWaiting())
+      .then(() => {
+        // Don't wait for media caching to finish installation
+        // This way the app becomes usable faster
+        self.skipWaiting();
+
+        // Start caching media files in the background
+        cacheMediaAssets();
+      })
   );
 });
 
+// Activate event - clean up old caches
 self.addEventListener("activate", (event) => {
   console.log("[Service Worker] Activating...");
   event.waitUntil(
@@ -55,7 +107,7 @@ self.addEventListener("activate", (event) => {
       .then((keyList) => {
         return Promise.all(
           keyList.map((key) => {
-            if (key !== CACHE_NAME) {
+            if (key !== CACHE_NAME && key !== MEDIA_CACHE_NAME) {
               console.log("[Service Worker] Removing old cache", key);
               return caches.delete(key);
             }
@@ -66,19 +118,42 @@ self.addEventListener("activate", (event) => {
   );
 });
 
+// Handle messages from clients
+self.addEventListener("message", (event) => {
+  if (event.data && event.data.type === "CACHE_ALL_MEDITATIONS") {
+    // Manually trigger caching of all meditation files
+    event.waitUntil(
+      cacheMediaAssets().then(() => {
+        // Notify client when complete
+        event.source.postMessage({
+          type: "CACHE_COMPLETE",
+        });
+      })
+    );
+  }
+});
+
+// Fetch event - serve from cache or network
 self.addEventListener("fetch", (event) => {
   // Only handle same-origin requests
   if (event.request.url.startsWith(self.location.origin)) {
+    // Check if request is for media file
+    const isMediaRequest = MEDIA_ASSETS.some((asset) =>
+      event.request.url.includes(asset.substring(1))
+    );
+
     event.respondWith(
+      // Try both caches
       caches.match(event.request).then((cachedResponse) => {
         if (cachedResponse) {
-          // If found in cache, return it
+          // If found in any cache, return it
           return cachedResponse;
         }
-        // If not, try fetching from the network
+
+        // If not in cache, try fetching from network
         return fetch(event.request)
           .then((response) => {
-            // Validate response before caching
+            // Validate response
             if (
               !response ||
               response.status !== 200 ||
@@ -86,15 +161,26 @@ self.addEventListener("fetch", (event) => {
             ) {
               return response;
             }
-            // Clone and store in cache for future use
+
+            // Clone the response
             const responseToCache = response.clone();
-            caches.open(CACHE_NAME).then((cache) => {
-              cache.put(event.request, responseToCache);
-            });
+
+            // Store in appropriate cache based on request type
+            if (isMediaRequest) {
+              caches.open(MEDIA_CACHE_NAME).then((cache) => {
+                cache.put(event.request, responseToCache);
+              });
+            } else {
+              caches.open(CACHE_NAME).then((cache) => {
+                cache.put(event.request, responseToCache);
+              });
+            }
+
             return response;
           })
           .catch((error) => {
             console.log("[Service Worker] Fetch failed:", error);
+
             // Serve offline.html for document requests
             if (event.request.destination === "document") {
               return caches.match("/offline.html");
