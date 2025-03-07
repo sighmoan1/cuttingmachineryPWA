@@ -1,15 +1,7 @@
 const CACHE_NAME = "cutting-machinery-v1";
 
-// All assets to cache (app shell and meditation audio files)
+// List of all assets to cache (app shell and meditation audio files)
 const ASSETS_TO_CACHE = [
-  // App shell assets
-  "/",
-  "/index.html",
-  "/css/main.css",
-  "/js/main.js",
-  "/offline.html",
-  "/manifest.json",
-  "/assets/logo.png",
   // Meditation audio files
   "/assets/Hour.mp3",
   "/assets/01-App-Intro.mp3",
@@ -27,33 +19,39 @@ const ASSETS_TO_CACHE = [
   "/assets/44-Depression-and-Anger.mp3",
   "/assets/45-Reality-and-Meta.mp3",
   "/assets/46-Fun-Stuff.mp3",
+  // App shell assets
+  "/",
+  "/index.html",
+  "/css/main.css",
+  "/js/main.js",
+  "/offline.html",
+  "/manifest.json",
+  "/assets/logo.png",
 ];
 
-// Install event: pre-cache everything.
+// Install event: Pre-cache everything.
 self.addEventListener("install", (event) => {
   console.log("[Service Worker] Installing and pre-caching assets...");
   event.waitUntil(
     caches
       .open(CACHE_NAME)
-      .then((cache) => {
-        return cache.addAll(ASSETS_TO_CACHE);
-      })
+      .then((cache) => cache.addAll(ASSETS_TO_CACHE))
       .then(() => self.skipWaiting())
       .catch((error) =>
-        console.error("[Service Worker] Failed to pre-cache:", error)
+        console.error("[Service Worker] Pre-caching failed:", error)
       )
   );
 });
 
-// Activate event: clean up any old caches.
+// Activate event: Clean up old caches.
 self.addEventListener("activate", (event) => {
   console.log("[Service Worker] Activating...");
   event.waitUntil(
     caches
       .keys()
-      .then((keyList) => {
+      .then((keys) => {
         return Promise.all(
-          keyList.map((key) => {
+          keys.map((key) => {
             if (key !== CACHE_NAME) {
               console.log("[Service Worker] Removing old cache:", key);
               return caches.delete(key);
@@ -65,21 +63,18 @@ self.addEventListener("activate", (event) => {
   );
 });
 
-// Fetch event: serve assets from cache first.
+// Fetch event: Serve cached assets, falling back to network.
 self.addEventListener("fetch", (event) => {
-  // Only handle same-origin requests.
   if (event.request.url.startsWith(self.location.origin)) {
     event.respondWith(
       caches.match(event.request).then((cachedResponse) => {
         return (
           cachedResponse ||
           fetch(event.request)
-            .then((response) => {
-              // Optionally update the cache here if desired.
-              return response;
-            })
+            .then((response) => response)
             .catch((error) => {
               console.error("[Service Worker] Fetch failed:", error);
+              // Optionally, return offline page for navigation requests.
               if (event.request.destination === "document") {
                 return caches.match("/offline.html");
               }
